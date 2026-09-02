@@ -27,6 +27,15 @@ class CopilotLLMClient:
 
     Uses GitHub's stored OAuth credentials from `copilot` CLI login.
     Falls back to COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN env vars.
+
+    MILESTONE 1 (Current): Text completion only
+    - Supports text-based LLM responses
+    - SimpleAgent handles repository tool execution separately
+    - Does NOT pass tools to Copilot's native tool system yet
+
+    FUTURE: Native tool support
+    - Will expose Copilot's built-in file tools
+    - Will bridge to RepositoryTool methods via Copilot tool execution
     """
 
     def __init__(
@@ -56,27 +65,37 @@ class CopilotLLMClient:
         system_prompt: Optional[str] = None,
     ) -> dict:
         """
-        Request a completion from Copilot LLM.
+        Request a text completion from Copilot LLM.
 
         Runs async event loop internally to adapt Copilot SDK's async API
         to our sync interface.
 
+        MILESTONE 1 (Current):
+        - ✅ Text-based completion
+        - ✅ System prompt support
+        - ✅ Message history (SimpleAgent maintains context)
+        - ❌ Native tool execution (SimpleAgent handles tool calls separately)
+
         Args:
-            messages: Conversation history.
-            tools: Optional tool definitions (JSON schema format).
-            system_prompt: Optional system prompt.
+            messages: Conversation history. Each message is:
+                {"role": "user"|"assistant", "content": "..."}
+                Last message MUST be from user.
+            tools: Currently ignored. SimpleAgent executes repository tools
+                separately after receiving text responses. Future versions will
+                support Copilot's native tool execution.
+            system_prompt: Optional system prompt for instructions.
 
         Returns:
-            Normalized dict with keys:
+            Dict with keys:
             {
-                "content": str,
-                "tool_calls": Optional[list[dict]],
-                    # Each tool call: {"tool_id": str, "arguments": dict}
-                "done": bool,
+                "content": str,  # LLM's text response
+                "tool_calls": None,  # Not supported yet
+                "done": bool,  # Always True (session completes)
             }
 
         Raises:
-            RuntimeError: If running inside an existing async event loop.
+            RuntimeError: If called from existing async event loop.
+            ValueError: If last message is not from user or content is empty.
         """
         try:
             # Check if we're already in an async context
@@ -102,11 +121,12 @@ class CopilotLLMClient:
         Async implementation of complete().
 
         Manages Copilot client lifecycle and handles event-based responses.
+        
+        NOTE: For this milestone, we support text completion only.
+        Tools are accepted in the signature but not passed to Copilot's native
+        tool execution system. SimpleAgent handles repository tool calls separately.
         """
-        # Convert our message format to Copilot format
-        copilot_messages = self._convert_messages(messages)
-
-        # Build session config
+        # Build session config for text completion only
         session_config: dict[str, Any] = {
             "on_permission_request": PermissionHandler.approve_all,
             "model": self.model,
@@ -119,9 +139,8 @@ class CopilotLLMClient:
                 "content": system_prompt,
             }
 
-        # Convert tools to Copilot format if provided
-        if tools:
-            session_config["tools"] = self._convert_tools(tools)
+        # NOTE: Not passing tools to Copilot yet. SimpleAgent will handle
+        # repository tool calls in a separate loop after getting text responses.
 
         # Create and use client
         async with CopilotClient(
@@ -133,65 +152,63 @@ class CopilotLLMClient:
 
     async def _run_session(self, session, messages: list[dict]) -> dict:
         """
-        Run a Copilot session and collect response.
+        Run a Copilot session and collect text response.
 
-        Listens for events and returns the first assistant message and any
-        tool calls. Sets done=True when session becomes idle.
+        For text completion, listens for assistant message and idle event.
+        Does NOT execute tools - SimpleAgent handles repository tools separately.
         """
-        result = {
-            "content": "",
-            "tool_calls": None,
-            "done": False,
-        }
-
-        # Prepare events to track
-        completion_event = asyncio.Event()
-        tool_calls_data = []
-        assistant_content = ""
-
-        def on_event(event):
-            nonlocal assistant_content, tool_calls_data
-
-            # Check event type by class name (duck typing)
-            event_type = type(event.data).__name__
-
-            if event_type == "AssistantMessageData":
-                # Capture assistant message
-                assistant_content = getattr(event.data, "content", "") or ""
-
-            elif event_type == "ToolCallData" or event_type == "ExternalToolRequestedData":
-                # Capture tool call - store the event data for later processing
-                tool_calls_data.append(event.data)
-
-            elif event_type == "SessionIdleData":
-                # Session finished
-                completion_event.set()
-
-        # Subscribe to events
-        session.on(on_event)
-
-        # Send the last user message (already in conversation history)
+        # Validate input
+        if not messages:
+            raise ValueError("Messages list cannot be empty")
+        
         last_message = messages[-1]
         if last_message.get("role") != "user":
             raise ValueError(
                 "Last message must be from user role for complete()"
             )
 
-        # Send to Copilot
-        await session.send(last_message.get("content", ""))
+        result = {
+            "content": "",
+            "tool_calls": None,  # Not supported for text-only completion
+            "done": False,
+        }
 
-        # Wait for completion
+        # Prepare to collect response
+        completion_event = asyncio.Event()
+        assistant_content = ""
+
+        def on_event(event):
+            nonlocal assistant_content
+
+            # Check event type by class name (duck typing)
+            event_type = type(event.data).__name__
+
+            if event_type == "AssistantMessageData":
+                # Capture assistant text response
+                content = getattr(event.data, "content", None)
+                if content:
+                    assistant_content = content
+
+            elif event_type == "SessionIdleData":
+                # Session finished - signal completion
+                completion_event.set()
+
+        # Subscribe to events
+        session.on(on_event)
+
+        # Send user's message to Copilot
+        user_text = last_message.get("content", "")
+        if not user_text:
+            raise ValueError("User message content cannot be empty")
+
+        await session.send(user_text)
+
+        # Wait for response and idle
         await completion_event.wait()
 
         # Build result
         result["content"] = assistant_content
-        result["done"] = True  # Copilot session completed
-
-        # Convert tool calls if any
-        if tool_calls_data:
-            result["tool_calls"] = [
-                self._convert_tool_call(tc) for tc in tool_calls_data
-            ]
+        result["done"] = True
 
         return result
 
