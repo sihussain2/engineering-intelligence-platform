@@ -7,10 +7,6 @@ from typing import Any, Optional
 try:
     from copilot import CopilotClient
     from copilot.session import PermissionHandler
-    from copilot.session_events import (
-        AssistantMessageData,
-        SessionIdleData,
-    )
 except ImportError:
     raise ImportError(
         "github-copilot-sdk is required. Install with: pip install github-copilot-sdk"
@@ -40,7 +36,7 @@ class CopilotLLMClient:
 
     def __init__(
         self,
-        model: str = "gpt-5",
+        model: str = "claude-haiku-4.5",
         github_token: Optional[str] = None,
         working_directory: Optional[str] = None,
     ):
@@ -48,7 +44,7 @@ class CopilotLLMClient:
         Initialize Copilot LLM client.
 
         Args:
-            model: Model to use. Default "gpt-5" (Copilot's latest).
+            model: Model to use. Default "claude-haiku-4.5" (Claude Haiku 4.5).
             github_token: GitHub token. If None, uses copilot CLI auth or env vars.
             working_directory: Working directory for Copilot operations.
         """
@@ -154,8 +150,12 @@ class CopilotLLMClient:
         """
         Run a Copilot session and collect text response.
 
-        For text completion, listens for assistant message and idle event.
-        Does NOT execute tools - SimpleAgent handles repository tools separately.
+        Uses session.send_and_wait() which blocks until the assistant message
+        is complete. Does NOT execute tools - SimpleAgent handles repository
+        tools separately.
+
+        The SDK's send_and_wait() returns the final AssistantMessageData event
+        containing the complete response text.
         """
         # Validate input
         if not messages:
@@ -167,48 +167,36 @@ class CopilotLLMClient:
                 "Last message must be from user role for complete()"
             )
 
-        result = {
-            "content": "",
-            "tool_calls": None,  # Not supported for text-only completion
-            "done": False,
-        }
-
-        # Prepare to collect response
-        completion_event = asyncio.Event()
-        assistant_content = ""
-
-        def on_event(event):
-            nonlocal assistant_content
-
-            # Check event type by class name (duck typing)
-            event_type = type(event.data).__name__
-
-            if event_type == "AssistantMessageData":
-                # Capture assistant text response
-                content = getattr(event.data, "content", None)
-                if content:
-                    assistant_content = content
-
-            elif event_type == "SessionIdleData":
-                # Session finished - signal completion
-                completion_event.set()
-
-        # Subscribe to events
-        session.on(on_event)
-
-        # Send user's message to Copilot
+        # Send user's message to Copilot and wait for complete response
         user_text = last_message.get("content", "")
         if not user_text:
             raise ValueError("User message content cannot be empty")
 
-        await session.send(user_text)
+        # send_and_wait() blocks until session becomes idle and returns
+        # the final assistant message event
+        response_event = await session.send_and_wait(user_text, timeout=30.0)
 
-        # Wait for response and idle
-        await completion_event.wait()
+        # Extract content from response
+        if response_event is None:
+            raise RuntimeError(
+                "Copilot did not return a response. Session may have failed."
+            )
 
-        # Build result
-        result["content"] = assistant_content
-        result["done"] = True
+        # Get the assistant message content
+        # The SDK returns AssistantMessageData as the final message event
+        content = getattr(response_event.data, "content", None)
+        
+        if not content:
+            raise RuntimeError(
+                "Copilot returned an empty response. "
+                "Check authentication and service status."
+            )
+
+        result = {
+            "content": content,
+            "tool_calls": None,  # Not supported for text-only completion
+            "done": True,
+        }
 
         return result
 

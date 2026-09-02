@@ -13,10 +13,10 @@ class TestCopilotLLMClientInitialization:
     """Test CopilotLLMClient initialization."""
 
     def test_client_initialization_with_default_model(self):
-        """Client initializes with default GPT-5 model."""
+        """Client initializes with default Claude Haiku 4.5 model."""
         with patch.dict(os.environ, {}, clear=True):
             client = CopilotLLMClient()
-            assert client.model == "gpt-5"
+            assert client.model == "claude-haiku-4.5"
             assert client.github_token is None
             assert client.working_directory is None
 
@@ -192,3 +192,153 @@ class TestCopilotLLMClientProtocolCompliance:
         assert "messages" in sig.parameters
         assert "tools" in sig.parameters
         assert "system_prompt" in sig.parameters
+
+
+class TestCopilotLLMClientEventHandling:
+    """Test response handling in _run_session method."""
+
+    def _run_async_test(self, async_func):
+        """Helper to run async test functions."""
+        return asyncio.run(async_func())
+
+    def test_run_session_with_response(self):
+        """_run_session returns content from send_and_wait response."""
+        async def test():
+            client = CopilotLLMClient()
+            
+            # Mock session with send_and_wait
+            mock_session = AsyncMock()
+            
+            # Mock the response event
+            mock_response_event = MagicMock()
+            mock_response_event.data = MagicMock()
+            mock_response_event.data.content = "Hello, how can I help?"
+            
+            mock_session.send_and_wait = AsyncMock(return_value=mock_response_event)
+            
+            result = await client._run_session(
+                mock_session, 
+                [{"role": "user", "content": "Hello"}]
+            )
+            
+            assert result["content"] == "Hello, how can I help?"
+            assert result["done"] is True
+            assert result["tool_calls"] is None
+            mock_session.send_and_wait.assert_called_once()
+        
+        self._run_async_test(test)
+
+    def test_run_session_none_response(self):
+        """_run_session raises error if send_and_wait returns None."""
+        async def test():
+            client = CopilotLLMClient()
+            
+            mock_session = AsyncMock()
+            mock_session.send_and_wait = AsyncMock(return_value=None)
+            
+            with pytest.raises(RuntimeError, match="did not return a response"):
+                await client._run_session(
+                    mock_session, 
+                    [{"role": "user", "content": "Hello"}]
+                )
+        
+        self._run_async_test(test)
+
+    def test_run_session_empty_response(self):
+        """_run_session raises error if response content is empty."""
+        async def test():
+            client = CopilotLLMClient()
+            
+            mock_session = AsyncMock()
+            
+            # Mock response with empty content
+            mock_response_event = MagicMock()
+            mock_response_event.data = MagicMock()
+            mock_response_event.data.content = ""
+            
+            mock_session.send_and_wait = AsyncMock(return_value=mock_response_event)
+            
+            with pytest.raises(RuntimeError, match="returned an empty response"):
+                await client._run_session(
+                    mock_session, 
+                    [{"role": "user", "content": "Hello"}]
+                )
+        
+        self._run_async_test(test)
+
+    def test_run_session_none_content_attribute(self):
+        """_run_session raises error if content attribute is missing."""
+        async def test():
+            client = CopilotLLMClient()
+            
+            mock_session = AsyncMock()
+            
+            # Mock response with no content attribute
+            mock_response_event = MagicMock()
+            mock_response_event.data = MagicMock(spec=[])  # No attributes
+            
+            mock_session.send_and_wait = AsyncMock(return_value=mock_response_event)
+            
+            with pytest.raises(RuntimeError, match="returned an empty response"):
+                await client._run_session(
+                    mock_session, 
+                    [{"role": "user", "content": "Hello"}]
+                )
+        
+        self._run_async_test(test)
+
+    def test_run_session_validates_user_message(self):
+        """_run_session raises error if last message not from user."""
+        async def test():
+            client = CopilotLLMClient()
+            
+            mock_session = AsyncMock()
+            mock_session.send_and_wait = AsyncMock()
+            
+            with pytest.raises(ValueError, match="Last message must be from user"):
+                await client._run_session(
+                    mock_session, 
+                    [{"role": "assistant", "content": "Hi"}]
+                )
+        
+        self._run_async_test(test)
+
+    def test_run_session_validates_empty_messages(self):
+        """_run_session raises error if messages list is empty."""
+        async def test():
+            client = CopilotLLMClient()
+            
+            mock_session = AsyncMock()
+            mock_session.send_and_wait = AsyncMock()
+            
+            with pytest.raises(ValueError, match="Messages list cannot be empty"):
+                await client._run_session(mock_session, [])
+        
+        self._run_async_test(test)
+
+    def test_run_session_calls_send_and_wait_with_content(self):
+        """_run_session sends correct message to send_and_wait."""
+        async def test():
+            client = CopilotLLMClient()
+            
+            mock_session = AsyncMock()
+            
+            # Mock response
+            mock_response_event = MagicMock()
+            mock_response_event.data = MagicMock()
+            mock_response_event.data.content = "Response"
+            
+            mock_session.send_and_wait = AsyncMock(return_value=mock_response_event)
+            
+            await client._run_session(
+                mock_session, 
+                [{"role": "user", "content": "Test question"}]
+            )
+            
+            # Verify send_and_wait was called with the correct message
+            mock_session.send_and_wait.assert_called_once_with(
+                "Test question",
+                timeout=30.0
+            )
+        
+        self._run_async_test(test)
