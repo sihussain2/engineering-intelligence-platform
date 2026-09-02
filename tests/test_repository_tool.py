@@ -24,3 +24,29 @@ def test_list_files_rejects_path_outside_repository(tmp_path: Path):
 
     with pytest.raises(ValueError):
         tool.list_files("../")
+
+
+def test_read_file_returns_file_contents(tmp_path: Path):
+    (tmp_path / "test.txt").write_text("hello world")
+
+    tool = RepositoryTool(tmp_path)
+
+    content = tool.read_file("test.txt")
+
+    assert content == "hello world"
+
+
+def test_read_file_rejects_path_outside_repository(tmp_path: Path):
+    tool = RepositoryTool(tmp_path)
+
+    with pytest.raises(ValueError):
+        tool.read_file("../../../etc/passwd")
+
+
+def test_read_file_rejects_directory(tmp_path: Path):
+    (tmp_path / "subdir").mkdir()
+
+    tool = RepositoryTool(tmp_path)
+
+    with pytest.raises(ValueError):
+        tool.read_file("subdir")

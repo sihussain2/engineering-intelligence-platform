@@ -22,7 +22,15 @@ class RepositoryTool:
 
     def read_file(self, path: str) -> str:
         """Read a text file from the repository."""
-        raise NotImplementedError
+        target = (self.root / path).resolve()
+
+        if not target.is_relative_to(self.root.resolve()):
+            raise ValueError("Path is outside the repository")
+
+        if not target.is_file():
+            raise ValueError("Path is not a file")
+
+        return target.read_text(encoding="utf-8")
 
     def search_code(self, query: str) -> list[dict]:
         """Search repository source files for a text query."""
