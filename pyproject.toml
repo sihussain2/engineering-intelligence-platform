@@ -3,7 +3,9 @@ name = "engineering-intelligence-platform"
 version = "0.1.0"
 description = "AI-powered software engineering platform"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "github-copilot-sdk>=1.0.0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -11,6 +13,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: integration tests requiring real Copilot service (deselect with '-m \"not integration\"')",
+]
+addopts = "-m 'not integration'"
 
 [tool.setuptools.packages.find]
 where = ["src"]
