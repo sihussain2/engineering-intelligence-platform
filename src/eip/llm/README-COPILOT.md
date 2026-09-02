@@ -12,18 +12,18 @@ The `CopilotLLMClient` adapter implements the `LLMClient` protocol, enabling sea
 - ✅ Authenticates via user's existing GitHub Copilot subscription
 - ✅ Adapts async SDK to sync `complete()` interface
 - ✅ Converts between message formats internally
-- ✅ Supports tool definitions and calls
+- ✅ Accepts tool definitions in interface (architecture-ready)
 - ✅ Handles system prompts
-- ✅ 18 unit tests with mock-based testing (no network calls)
-- ✅ Optional integration test example for manual verification
+- ✅ 25+ unit tests with mock-based testing (no network calls)
+- ✅ Manual integration test for real Copilot verification
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| [src/eip/llm/copilot.py](../src/eip/llm/copilot.py) | `CopilotLLMClient` adapter (173 LOC) |
-| [tests/test_copilot_adapter.py](../tests/test_copilot_adapter.py) | Unit tests with mocks (18 tests) |
-| [examples/test_copilot_integration.py](../examples/test_copilot_integration.py) | Optional integration test |
+| [copilot.py](copilot.py) | `CopilotLLMClient` adapter |
+| [../../tests/test_copilot_adapter.py](../../tests/test_copilot_adapter.py) | Unit tests with mocks (25+ tests) |
+| [../../tests/manual_test_copilot.py](../../tests/manual_test_copilot.py) | Manual integration test |
 
 ## Installation
 
@@ -60,7 +60,7 @@ from eip.repository.tool import RepositoryTool
 from pathlib import Path
 
 # Create adapter
-client = CopilotLLMClient(model="gpt-5")
+client = CopilotLLMClient(model="claude-haiku-4.5")
 
 # Use in conversation
 messages = [
@@ -129,11 +129,8 @@ pytest  # -m "not integration" is default
 ### Run Integration Tests (requires real Copilot)
 
 ```bash
-# Set flag to enable integration tests
-RUN_COPILOT_INTEGRATION=1 pytest examples/test_copilot_integration.py -v
-
-# Or run as manual test script
-python examples/test_copilot_integration.py manual
+# Run the manual integration test
+python tests/manual_test_copilot.py
 ```
 
 **Integration tests require:**
@@ -157,6 +154,19 @@ copilot.CopilotClient (GitHub Copilot SDK)
 Copilot CLI Runtime (bundled with SDK)
 ```
 
+**Current State:**
+The adapter currently provides **text-only responses** from the Copilot LLM. Tool definitions are accepted in the `complete()` interface for architectural readiness, and the EIP tool execution foundation exists (via ToolDispatcher and RepositoryTool). However, real Copilot provider-level tool calling is not yet connected end-to-end. 
+
+In the current milestone:
+- ✅ `CopilotLLMClient` sends requests to Copilot and receives text responses
+- ✅ `SimpleAgent` can parse tool calls from LLM responses and iterate
+- ✅ `ToolDispatcher` routes and executes repository tools via `RepositoryTool`
+- ❌ Copilot's native tool execution is not connected to EIP's `ToolDispatcher`
+- ❌ SimpleAgent receives text only; tool execution happens through agent iteration, not Copilot's native tool system
+
+**Next Milestone:**
+Enable real Copilot provider-level tool calling to be bridged to EIP's `ToolDispatcher`, allowing the LLM to dynamically invoke repository tools through Copilot's native tool system rather than through text-based response parsing. This requires SDK updates and plumbing between Copilot's tool result callbacks and EIP's tool execution logic.
+
 **Key Design Decisions:**
 
 1. **Sync-to-Async Bridge:** SDK is async, protocol is sync. Adapter uses `asyncio.run()` to bridge them.
@@ -179,11 +189,11 @@ Copilot CLI Runtime (bundled with SDK)
 
 ### Models Supported
 
-The adapter supports any model available via Copilot:
+The adapter supports any model available via your Copilot installation:
 
-- `"gpt-5"` - Latest GPT model (default)
-- `"claude-sonnet-4.5"` - Latest Claude model
-- `"auto"` - Auto-routing tier (requires runtime support)
+- `"claude-haiku-4.5"` - Claude Haiku 4.5 (current default)
+- `"claude-sonnet-5"` - Claude Sonnet 5
+- Others available in your Copilot subscription
 
 Full list available via `CopilotClient.list_models()`.
 
@@ -193,9 +203,9 @@ Full list available via `CopilotClient.list_models()`.
 - ❌ No streaming responses yet
 - ❌ No parallel tool execution
 - ❌ No tool caching
-- ❌ No session persistence
-- ❌ No multi-turn memory across sessions
+- ❌ No session persistence (each `complete()` call is independent)
 - ❌ No observability/telemetry integration
+- ❌ LLM tool calling not yet connected to EIP ToolDispatcher (text-only responses currently)
 
 **Future Enhancements:**
 - Add streaming support via event filtering
@@ -208,14 +218,16 @@ Full list available via `CopilotClient.list_models()`.
 
 ## Test Coverage
 
-**18 Unit Tests** covering:
+**25+ Unit Tests** covering:
 
 | Component | Tests | Coverage |
 |-----------|-------|----------|
 | Initialization | 8 | Token sources, model selection, config |
 | Message Conversion | 6 | Format passthrough, tool conversion |
 | Tool Handling | 1 | Tool definition conversion |
-| Protocol Compliance | 3 | Interface implementation, signature |
+| Protocol Compliance | 2 | Interface implementation, signature |
+| Response Handling | 7 | Valid responses, None response, empty response, missing attributes |
+| Event Processing | Additional | SDK event handling and session management |
 
 All tests use mocks/fakes and don't make real Copilot SDK calls.
 
@@ -236,15 +248,7 @@ ValueError: "Last message must be from user role for complete()"
 
 ## Performance
 
-**Typical latency:**
-- Simple text response: ~2-5 seconds
-- With tool calls: ~5-10 seconds
-- Overhead from adapter: <100ms
-
-**Memory usage:**
-- Base SDK: ~50MB (shared with CLI runtime)
-- Per-session: ~10-20MB
-- Adapter overhead: <1MB
+**Note:** Performance characteristics depend heavily on Copilot service response times and network conditions. No systematic measurements are currently documented. For production use, conduct benchmarking with your typical workloads.
 
 ## Security
 
@@ -253,10 +257,11 @@ ValueError: "Last message must be from user role for complete()"
 - Tokens not stored in code
 - Supports environment variable injection
 
-**Access Control:**
+**Access Control (Architectural Intent):**
 - Tools can be filtered via `ToolDispatcher`
 - Permission requests supported via SDK hooks
-- Repository access sandboxed via `RepositoryTool`
+- RepositoryTool provides read-only access with path validation
+- **Note:** Current Copilot integration receives text responses only. Real tool-based access control will be enforced once LLM tool calling is connected.
 
 **Data:**
 - No request caching
@@ -274,6 +279,6 @@ ValueError: "Last message must be from user role for complete()"
 ## See Also
 
 - [GitHub Copilot SDK Docs](https://github.com/github/copilot-sdk)
-- [LLMClient Protocol](../protocol.py)
-- [SimpleAgent Implementation](../agent.py)
-- [ToolDispatcher](../dispatcher.py)
+- [LLMClient Protocol](protocol.py)
+- [SimpleAgent Implementation](agent.py)
+- [ToolDispatcher](dispatcher.py)
