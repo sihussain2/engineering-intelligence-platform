@@ -53,6 +53,12 @@ class SimpleAgent:
         self.dispatcher = ToolDispatcher(repository_tool)
         self.max_iterations = max_iterations
 
+        # Configure the LLM client with dispatcher if it supports tool execution.
+        # For CopilotLLMClient, this enables real provider tool calling.
+        # For other clients, this is a no-op (they don't have a dispatcher attribute).
+        if hasattr(llm_client, "dispatcher") and not llm_client.dispatcher:
+            llm_client.dispatcher = self.dispatcher
+
     def run(self, requirement: str, system_prompt: Optional[str] = None) -> AgentSession:
         """
         Run agent loop for a given requirement.
