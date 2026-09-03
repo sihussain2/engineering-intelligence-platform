@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from eip.repository.tool import RepositoryTool
+from eip.repository.modification import RepositoryModificationTool
+from eip.repository.execution import TestExecutionTool
 from eip.llm.tools import ALL_TOOLS, ToolDefinition
 
 
@@ -41,11 +43,11 @@ class ToolResult:
 
 
 class ToolDispatcher:
-    """Routes and executes tool calls against RepositoryTool."""
+    """Routes and executes tool calls for repository operations."""
 
     def __init__(self, repository_tool: RepositoryTool):
         """
-        Initialize dispatcher with a repository tool.
+        Initialize dispatcher with repository tools.
 
         Args:
             repository_tool: RepositoryTool instance for repository access.
@@ -53,6 +55,8 @@ class ToolDispatcher:
         if not isinstance(repository_tool, RepositoryTool):
             raise TypeError("repository_tool must be a RepositoryTool instance")
         self.repository_tool = repository_tool
+        self.modification_tool = RepositoryModificationTool(repository_tool.root)
+        self.execution_tool = TestExecutionTool(repository_tool.root)
 
     def get_tools(self) -> list[dict]:
         """Get all available tools in LLM-consumable format."""
@@ -101,6 +105,36 @@ class ToolDispatcher:
                 result = self.repository_tool.search_code(query, max_results)
                 return ToolResult(
                     tool_id=call.tool_id, success=True, result=result
+                )
+
+            elif call.tool_id == "repo.modify_file":
+                path = call.arguments.get("path")
+                old_content = call.arguments.get("old_content")
+                new_content = call.arguments.get("new_content")
+                if not path or old_content is None or new_content is None:
+                    return ToolResult(
+                        tool_id=call.tool_id,
+                        success=False,
+                        error="'path', 'old_content', and 'new_content' arguments are required",
+                    )
+                mod_result = self.modification_tool.modify_file(
+                    path, old_content, new_content
+                )
+                return ToolResult(
+                    tool_id=call.tool_id,
+                    success=mod_result.success,
+                    result=mod_result.to_dict() if mod_result.success else None,
+                    error=mod_result.error,
+                )
+
+            elif call.tool_id == "repo.run_tests":
+                test_path = call.arguments.get("test_path")
+                test_result = self.execution_tool.run_tests(test_path)
+                return ToolResult(
+                    tool_id=call.tool_id,
+                    success=test_result.success,
+                    result=test_result.to_dict(),
+                    error=None,
                 )
 
             else:

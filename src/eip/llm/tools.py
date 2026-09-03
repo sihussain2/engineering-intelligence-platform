@@ -81,4 +81,55 @@ SEARCH_CODE_TOOL = ToolDefinition(
     },
 )
 
-ALL_TOOLS = [LIST_FILES_TOOL, READ_FILE_TOOL, SEARCH_CODE_TOOL]
+# Tool definitions for RepositoryModificationTool methods
+
+MODIFY_FILE_TOOL = ToolDefinition(
+    tool_id="repo.modify_file",
+    name="modify_file",
+    description="Modify a file by replacing exact content. Requires exact match of old_content (must occur exactly once). Changes are only applied after all validation succeeds.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Repository-relative path to the file to modify.",
+            },
+            "old_content": {
+                "type": "string",
+                "description": "Exact current content to replace. Must match exactly once in the file.",
+            },
+            "new_content": {
+                "type": "string",
+                "description": "New content to replace old_content with.",
+            },
+        },
+        "required": ["path", "old_content", "new_content"],
+    },
+)
+
+# Tool definitions for TestExecutionTool methods
+
+RUN_TESTS_TOOL = ToolDefinition(
+    tool_id="repo.run_tests",
+    name="run_tests",
+    description="Execute the repository's pytest test suite. Returns test results including pass/fail status, output, and summary.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "test_path": {
+                "type": "string",
+                "description": "Optional repository-relative path to specific test file or directory. If not provided, runs entire test suite.",
+                "default": None,
+            }
+        },
+        "required": [],
+    },
+)
+
+ALL_TOOLS = [
+    LIST_FILES_TOOL,
+    READ_FILE_TOOL,
+    SEARCH_CODE_TOOL,
+    MODIFY_FILE_TOOL,
+    RUN_TESTS_TOOL,
+]

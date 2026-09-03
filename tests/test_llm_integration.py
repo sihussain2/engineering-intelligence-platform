@@ -29,10 +29,13 @@ class TestToolDispatcher:
 
         tools = dispatcher.get_tools()
 
-        assert len(tools) == 3
+        # Now returns 5 tools: 3 read + 1 write + 1 execute
+        assert len(tools) == 5
         assert any(t["tool_id"] == "repo.list_files" for t in tools)
         assert any(t["tool_id"] == "repo.read_file" for t in tools)
         assert any(t["tool_id"] == "repo.search_code" for t in tools)
+        assert any(t["tool_id"] == "repo.modify_file" for t in tools)
+        assert any(t["tool_id"] == "repo.run_tests" for t in tools)
 
     def test_execute_list_files(self, tmp_path: Path):
         (tmp_path / "file1.py").write_text("x = 1")

@@ -430,11 +430,13 @@ class TestToolAllowlisting:
         # Build available_tools the same way _complete_async does
         available_tools = [f"custom:{tool.get('name', '')}" for tool in tools]
         
-        # Verify structure
-        assert len(available_tools) == 3
+        # Verify structure (5 tools: 3 read + 1 write + 1 execute)
+        assert len(available_tools) == 5
         assert "custom:list_files" in available_tools
         assert "custom:read_file" in available_tools
         assert "custom:search_code" in available_tools
+        assert "custom:modify_file" in available_tools
+        assert "custom:run_tests" in available_tools
         
         # Verify format is correct
         assert all(t.startswith("custom:") for t in available_tools)
