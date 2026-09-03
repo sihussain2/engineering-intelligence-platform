@@ -69,6 +69,10 @@ class CopilotLLMClient:
         self.working_directory = working_directory
         self.dispatcher = dispatcher
 
+        # Track tool executions during this session for visibility to caller
+        # Reset at the start of each complete() call
+        self.executed_tool_calls: list[dict] = []
+
     def complete(
         self,
         messages: list[dict],
@@ -87,6 +91,12 @@ class CopilotLLMClient:
         - ✅ Message history (SimpleAgent maintains context)
         - ✅ Real Copilot tool calling (if dispatcher is provided)
 
+        MILESTONE 5 (Enhancement):
+        - ✅ Tool execution visibility: Returns tool_calls list with all
+          tools executed by Copilot SDK during this session
+        - ✅ Execution tracking: Each tool invocation is captured and returned
+          for SimpleAgent to record and track
+
         Args:
             messages: Conversation history. Each message is:
                 {"role": "user"|"assistant", "content": "..."}
@@ -100,15 +110,19 @@ class CopilotLLMClient:
         Returns:
             Dict with keys:
             {
-                "content": str,  # LLM's text response
-                "tool_calls": None,  # Tool calls are handled internally by SDK
-                "done": bool,  # Always True (session completes)
+                "content": str,           # LLM's text response
+                "tool_calls": list[dict], # All tools executed by SDK during session
+                "done": bool,             # Always True (Copilot session completed)
             }
 
         Raises:
             RuntimeError: If called from existing async event loop.
             ValueError: If last message is not from user or content is empty.
         """
+        # Reset tool execution tracking for this complete() call
+        # Ensures results from previous calls cannot leak into new calls
+        self.executed_tool_calls = []
+
         try:
             # Check if we're already in an async context
             loop = asyncio.get_running_loop()
@@ -235,6 +249,7 @@ class CopilotLLMClient:
         Handle a tool invocation from Copilot SDK.
 
         Bridges Copilot's tool invocation to EIP's ToolDispatcher.
+        Tracks executed tool calls for visibility to the caller.
 
         Args:
             tool_id: EIP tool ID (from tool definition)
@@ -262,6 +277,17 @@ class CopilotLLMClient:
 
             # Execute through EIP's ToolDispatcher
             tool_result = self.dispatcher.execute_call(tool_call)
+
+            # Track this tool invocation for visibility
+            # Store in a format compatible with SimpleAgent expectations
+            self.executed_tool_calls.append({
+                "tool_id": tool_id,
+                "arguments": invocation.arguments or {},
+                "success": tool_result.success,
+                "result": tool_result.result,
+                "error": tool_result.error,
+                "already_executed": True,  # Flag: SDK already executed this
+            })
 
             # Convert EIP ToolResult to SDK ToolResult
             if tool_result.success:
@@ -353,7 +379,7 @@ class CopilotLLMClient:
 
         result = {
             "content": content,
-            "tool_calls": None,  # SDK handles tool calls internally
+            "tool_calls": self.executed_tool_calls,  # All tools executed during session
             "done": True,
         }
 

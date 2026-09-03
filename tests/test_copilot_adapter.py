@@ -223,7 +223,7 @@ class TestCopilotLLMClientEventHandling:
             
             assert result["content"] == "Hello, how can I help?"
             assert result["done"] is True
-            assert result["tool_calls"] is None
+            assert result["tool_calls"] == []  # Empty list when no tools executed (Milestone 5)
             mock_session.send_and_wait.assert_called_once()
         
         self._run_async_test(test)

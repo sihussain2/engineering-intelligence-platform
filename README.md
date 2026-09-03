@@ -419,7 +419,170 @@ The current implementation is an **early foundation**. It does NOT yet implement
 
 ---
 
-## 10. Current Architecture vs. Future Architecture
+## 10. Token Efficiency and Cost Control Strategy
+
+**Why This Matters**
+
+Running an autonomous AI engineering system at scale requires managing both capability and cost. An AI that can solve problems but consumes unlimited tokens is not productionizable.
+
+**The Challenge**
+
+- A complex engineering requirement might involve deep investigation, multiple iterations, recovery from failures, testing, review, and evaluation
+- Each step consumes LLM tokens
+- Tokens cost money
+- If token consumption scales poorly with task complexity, the system becomes economically unviable
+
+**The Strategy**
+
+EIP is designed with token efficiency and cost control as first-class concerns:
+
+### 1. Intelligent Model Selection
+
+**Problem:** Not all tasks need a powerful (and expensive) model.
+- Reading a file: doesn't need Claude 3.5 Sonnet
+- Searching code: doesn't need advanced reasoning
+- Analyzing complex architecture: might need stronger reasoning
+
+**Solution:** Route tasks to appropriate models
+```
+Simple lookup      → Fast model (Claude Haiku - 1/10 token cost)
+Code search        → Fast model (Claude Haiku)
+Reading files      → Fast model (Claude Haiku)
+Planning           → Standard model (Claude 3.5 Sonnet)
+Complex reasoning  → Standard model (Claude 3.5 Sonnet)
+Recovery/debug     → Standard model (if needed)
+Final review       → Strong model (Claude 3 Opus)
+```
+
+**Benefit:** 70-80% token cost reduction by using cheaper models for simpler tasks.
+
+### 2. Context Optimization
+
+**Problem:** Long conversations with full history consume exponentially more tokens.
+
+**Solutions:**
+- **Summary compression:** Summarize completed phases before moving to next phase
+- **Selective context:** Include only relevant file snippets, not entire files
+- **Context hierarchy:** Keep current step context small, archive old context
+- **Smart chunking:** Break large files into relevant sections, only pass needed sections to LLM
+
+**Example:**
+```
+❌ BAD: "Here are 10,000 lines of repository code, analyze all of it"
+         (Tokens: 15,000+)
+
+✅ GOOD: "The failing test is in test_payment.py lines 42-58. 
+          The implementation is in payment.py lines 100-150.
+          Search results show 3 related files."
+         (Tokens: 800)
+```
+
+**Benefit:** 10x token reduction through focused context.
+
+### 3. Iteration Control
+
+**Problem:** An agent that repeats itself or explores exhaustively can waste tokens.
+
+**Solutions:**
+- **Iteration budgets:** Limit agent iterations per phase
+- **Early termination:** Stop exploring when requirements are met
+- **Branching control:** Limit number of alternative approaches tried
+- **Caching:** Remember results from previous similar investigations
+
+**Example:**
+```
+Agent Loop Budget:
+├─ Investigation phase: max 3 iterations
+├─ Implementation phase: max 5 iterations
+├─ Testing phase: max 4 iterations
+└─ Recovery phase: max 3 iterations
+Total: 15 iterations max (vs unlimited)
+```
+
+**Benefit:** Predictable token consumption, avoids runaway costs.
+
+### 4. Cost Tracking and Budgets
+
+**Design:**
+- **Per-requirement budget:** Each requirement gets a token budget
+- **Per-phase tracking:** Know costs at each workflow stage
+- **Real-time accounting:** Track spend during execution
+- **Budget alerts:** Warn before exceeding budget
+- **Cost analysis:** Understand which tasks are expensive
+
+**Example:**
+```
+Requirement: "Add payment feature to checkout"
+├─ Budget: 50,000 tokens
+├─ Investigation: 5,000 / 10,000 (50% of phase budget)
+├─ Planning: 8,000 / 15,000 (53% of phase budget)
+├─ Implementation: 12,000 / 15,000 (80% of phase budget)
+├─ Testing: 3,000 / 5,000 (60% of phase budget)
+├─ Review: 2,000 / 5,000 (40% of phase budget)
+└─ TOTAL: 30,000 / 50,000 tokens used (60%)
+```
+
+**Benefit:** Transparency and control over AI operating costs.
+
+### 5. Structured Workflow Efficiency
+
+**Problem:** Unstructured conversations with LLMs often waste tokens on:
+- Explaining the same context repeatedly
+- Asking clarifying questions
+- Backtracking due to misunderstandings
+- Repeating analysis in different words
+
+**Solution:** Structured workflow with explicit phases
+- Each phase has a clear input, expected output, and success criteria
+- Prompts are tailored to the current phase, not the full history
+- Context is passed strategically, not conversationally
+- Results are validated before moving forward
+
+**Benefit:** 5-10x efficiency improvement through focused, structured workflow.
+
+### 6. Parallel Execution
+
+**Problem:** Sequential analysis of independent tasks multiplies token cost.
+
+**Solution:** Parallelize where safe
+- Analyze multiple code paths simultaneously
+- Run multiple test scenarios in parallel
+- Investigate different potential solutions in parallel
+
+**Benefit:** Same work in 1/N time and tokens (where N = parallelism).
+
+### The Payoff
+
+Combined, these strategies can achieve:
+- **75-90% token reduction** vs. unoptimized approaches
+- **Predictable costs** through budgeting and accounting
+- **Scalability** from single requirements to enterprise workloads
+- **Sustainability** as an economically viable autonomous system
+
+**Concrete Example:**
+```
+Same engineering task:
+
+Unoptimized approach (chat with LLM):
+├─ Repeated context: 20,000 tokens wasted
+├─ Clarification loops: 15,000 tokens
+├─ Backtracking: 10,000 tokens
+├─ Redundant analysis: 8,000 tokens
+└─ Total: 53,000 tokens, $1.06 (at GPT-4 pricing)
+
+EIP optimized approach:
+├─ Model selection: Claude Haiku for 60% of work
+├─ Context pruning: Only relevant code excerpts
+├─ Structured phases: No repetition or backtracking
+├─ Iteration control: Budget enforcement
+└─ Total: 8,000 tokens, $0.12 (90% savings)
+```
+
+**Long-term Vision:** As EIP matures, token efficiency becomes a competitive advantage. Systems that achieve high-quality results with low token consumption can operate sustainably at scale.
+
+---
+
+## 11. Current Architecture vs. Future Architecture
 
 ### Current Implementation
 
@@ -510,7 +673,7 @@ GitHub (PRs, commits, integration)
 
 ---
 
-## 11. Development Roadmap
+## 12. Development Roadmap
 
 **Phase 1 — Foundation** (current)
 - ✅ Repository tools (list, read, search)
@@ -559,7 +722,7 @@ GitHub (PRs, commits, integration)
 
 ---
 
-## 12. TradePredictor
+## 13. TradePredictor
 
 [TradePredictor](https://github.com/sihussain2/TradePredictor) is the real software repository being used to develop and demonstrate EIP.
 

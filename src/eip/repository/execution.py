@@ -1,7 +1,8 @@
 """Controlled test execution tool for the Engineering Intelligence Platform."""
 
+import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +16,10 @@ class TestResult:
     stdout: str
     stderr: str
     summary: str  # Human-readable summary
+    failure_type: Optional[str] = None  # "test_failure", "execution_error", "timeout"
+    failed_tests: list[str] = field(default_factory=list)  # Names of failed tests
+    passed_count: int = 0  # Number of passed tests
+    failed_count: int = 0  # Number of failed tests
 
     def to_dict(self) -> dict:
         """Convert to dict for LLM consumption."""
@@ -24,6 +29,10 @@ class TestResult:
             "stdout": self.stdout,
             "stderr": self.stderr,
             "summary": self.summary,
+            "failure_type": self.failure_type,
+            "failed_tests": self.failed_tests,
+            "passed_count": self.passed_count,
+            "failed_count": self.failed_count,
         }
 
 
@@ -61,6 +70,7 @@ class TestExecutionTool:
                         stdout="",
                         stderr="Test path is outside the repository",
                         summary="Invalid test path",
+                        failure_type="execution_error",
                     )
                 pytest_target = test_path
             except (ValueError, OSError) as e:
@@ -70,6 +80,7 @@ class TestExecutionTool:
                     stdout="",
                     stderr=f"Invalid test path: {str(e)}",
                     summary="Invalid test path",
+                    failure_type="execution_error",
                 )
         else:
             # Run all tests from repository root
@@ -94,6 +105,7 @@ class TestExecutionTool:
                 stdout="",
                 stderr="Test execution timed out after 120 seconds",
                 summary="Test execution timed out",
+                failure_type="timeout",
             )
         except Exception as e:
             return TestResult(
@@ -102,12 +114,17 @@ class TestExecutionTool:
                 stdout="",
                 stderr=f"Test execution failed: {str(e)}",
                 summary="Test execution error",
+                failure_type="execution_error",
             )
 
         # Parse results
         success = result.returncode == 0
         stdout = result.stdout
         stderr = result.stderr
+
+        # Determine failure type and extract test counts
+        failure_type = None if success else "test_failure"
+        passed_count, failed_count, failed_tests = self._parse_test_output(stdout, stderr)
 
         # Generate summary from output
         summary = self._generate_summary(success, stdout, stderr, result.returncode)
@@ -118,7 +135,42 @@ class TestExecutionTool:
             stdout=stdout,
             stderr=stderr,
             summary=summary,
+            failure_type=failure_type,
+            failed_tests=failed_tests,
+            passed_count=passed_count,
+            failed_count=failed_count,
         )
+
+    @staticmethod
+    def _parse_test_output(stdout: str, stderr: str) -> tuple[int, int, list[str]]:
+        """
+        Parse pytest output to extract test counts and failed test names.
+
+        Returns:
+            (passed_count, failed_count, list of failed test names)
+        """
+        passed_count = 0
+        failed_count = 0
+        failed_tests = []
+
+        # Look for pytest summary line like "5 passed, 2 failed in 0.25s"
+        summary_pattern = r"(\d+)\s+passed"
+        passed_match = re.search(summary_pattern, stdout)
+        if passed_match:
+            passed_count = int(passed_match.group(1))
+
+        summary_pattern = r"(\d+)\s+failed"
+        failed_match = re.search(summary_pattern, stdout)
+        if failed_match:
+            failed_count = int(failed_match.group(1))
+
+        # Extract failed test names from FAILED lines
+        # Pattern: "FAILED path/to/test.py::TestClass::test_method - ..."
+        failed_pattern = r"FAILED\s+([^\s]+(?:::[\w_]+)*)\s+"
+        for match in re.finditer(failed_pattern, stdout):
+            failed_tests.append(match.group(1))
+
+        return passed_count, failed_count, failed_tests
 
     @staticmethod
     def _generate_summary(
