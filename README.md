@@ -359,63 +359,90 @@ A structured, controlled, and auditable approach may be particularly valuable in
 
 ## 9. What Works Today
 
-The current implementation is an **early foundation**. It does NOT yet implement the full engineering workflow.
+The current implementation spans **Milestones 1–5**. It implements repository analysis, controlled code modification, test execution, and failure recovery. The full engineering workflow (approval gates, evaluation, Git integration) is not yet implemented.
 
-### Implemented Components
+### Fully Implemented Components (Milestones 1–5)
 
-✅ **RepositoryTool** — Read-only access to repository content:
+✅ **RepositoryTool** — Read-only access to repository content (Milestone 1):
 - `list_files(path)` — List all files and directories
 - `read_file(path)` — Read individual source files  
 - `search_code(query)` — Search repository for text patterns with line numbers
+- Validation: Path normalization, security (prevents path traversal)
 
-✅ **SimpleAgent** — Minimal agent loop that:
+✅ **RepositoryModificationTool** — Controlled file modification (Milestone 4):
+- `modify_file(path, old_content, new_content)` — Replace exact content with strict validation
+- Validation: Requires exact match, must occur exactly once, preserves rest of file
+- Returns structured evidence of changes
+
+✅ **TestExecutionTool** — Automated test execution (Milestone 4):
+- `run_tests(test_path=None)` — Execute pytest test suite
+- Enhanced diagnostics: Failure classification, test count extraction, failed test names
+- Enables agent to understand test results for recovery
+
+✅ **SimpleAgent** — Iterative agent loop with failure recovery (Milestone 5):
 - Accepts a requirement
-- Calls LLM with tools
-- Executes tool calls via ToolDispatcher
-- Collects results and continues until done
+- Investigates repository with tools
+- Makes controlled modifications
+- Runs tests and detects failures
+- Diagnoses failures and makes corrective modifications
+- Continues iteration until tests pass or max iterations reached
+- Tracks session state: tests_passed, recovery_attempts, modifications_made
+
+✅ **Real LLM Tool Calling** — Native Copilot SDK tool invocation (Milestone 2):
+- Copilot SDK's `send_and_wait()` handles native tool calling
+- Tool handlers bridge SDK tool invocations to EIP's ToolDispatcher
+- Tool execution tracking provides visibility to agent
+- Tool allowlisting via Copilot's `available_tools` parameter
 
 ✅ **LLMClient Protocol** — Provider-independent interface:
 - Enables swapping between OpenAI, Anthropic, Copilot, local models without changing core code
 - Method: `complete(messages, tools, system_prompt) → dict`
 
-✅ **ToolDispatcher** — Routes and executes LLM tool requests:
+✅ **ToolDispatcher** — Routes and executes all LLM tool requests:
 - Validates tool calls
-- Executes against RepositoryTool
-- Returns results to agent loop
+- Executes against RepositoryTool, RepositoryModificationTool, TestExecutionTool
+- Returns structured results to agent loop
 
-✅ **GitHub Copilot SDK Integration** — Real LLM responses:
+✅ **GitHub Copilot SDK Integration** — Real LLM with native tool calling:
 - Authenticated requests using Claude Haiku 4.5
+- Native tool calling with callback handlers
 - Proper error handling and response validation
 - Session management with timeout protection
 
-✅ **RepositoryAnalyst Foundation** — Skeleton for requirement analysis against repositories
+✅ **RepositoryAnalyst** — LLM-driven requirement analysis (Milestone 3):
+- Uses SimpleAgent to explore repository
+- Produces structured analysis results
 
-✅ **Automated Test Suite** — 93 tests:
+✅ **Structured Verification Models** — End-to-end result tracking (Milestone 5):
+- EngineringResult with status, implementation summary, verification evidence
+- Enables structured tracking of requirement satisfaction
+
+✅ **Comprehensive Test Suite** — 192 tests:
+- Repository tool operations (13 tests)
+- File modification validation (11 tests)
+- Test execution and parsing (enhanced suite)
+- Agent loops and iterative recovery (10+ tests)
+- Copilot SDK integration and tool tracking (9+ tests)
+- Tool dispatch and execution (multiple tests)
 - Component integration testing
 - Protocol compliance verification
 - Error handling and edge cases
-- Repository tool operations
-- LLM client initialization and response handling
 
 ### NOT Yet Implemented
 
-❌ **Real LLM Tool Calling** — The LLM currently returns text-only responses. Tool calls are structurally supported in SimpleAgent but Copilot integration doesn't yet invoke Copilot's native tool calling.
-
-❌ **Code Modification** — No ability to modify repository files yet.
-
-❌ **Test Execution** — No automated testing or test framework integration yet.
-
 ❌ **Human Approval Workflows** — No mechanism for human approval gates.
 
-❌ **Review and Evaluation** — No code review or requirement satisfaction evaluation logic.
+❌ **Requirement Satisfaction Evaluation** — No logic to verify requirement was actually satisfied (vs. just tests passing).
 
-❌ **GitHub Integration** — No pull request creation or Git integration.
+❌ **Code Review** — No code review or architectural analysis.
+
+❌ **GitHub Integration** — No pull request creation or Git operations.
 
 ❌ **Secure Execution Environments** — No containerization or sandboxing.
 
-❌ **Observability Systems** — No engineering flight recorder or audit logging yet.
+❌ **Observability Systems** — No engineering flight recorder or audit logging.
 
-❌ **LLM Gateway** — No multi-provider routing, rate limiting, token accounting, or cost tracking.
+❌ **LLM Gateway** — No multi-provider routing, model selection, token accounting, or cost tracking.
 
 ---
 
@@ -614,7 +641,7 @@ RepositoryTool
 Repository
 ```
 
-**Status:** SimpleAgent can call tools and iterate, but Copilot integration currently provides text-only responses.
+**Status:** Complete with real tool calling. Copilot SDK's `send_and_wait()` handles native tool invocations via registered handlers, enabling full iterative workflows.
 
 ### Intended Future Platform
 
@@ -675,35 +702,41 @@ GitHub (PRs, commits, integration)
 
 ## 12. Development Roadmap
 
-**Phase 1 — Foundation** (current)
+**Phase 1 — Foundation** ✅ COMPLETE
 - ✅ Repository tools (list, read, search)
 - ✅ LLM integration and provider abstraction
 - ✅ Basic agent loop
-- → Next: Real tool calling from LLM
+- ✅ Real LLM tool calling (native Copilot SDK)
 
-**Phase 2 — Engineering Agent**
-- Real LLM tool calling
-- Repository investigation through controlled tools
-- Structured planning for requirements
-- → Next: Human approval and implementation
+**Phase 2 — Engineering Agent** ✅ COMPLETE
+- ✅ Real LLM tool calling with tool handlers
+- ✅ Repository investigation through controlled tools
+- ✅ Structured planning for requirements
+- ✅ File modification with strict validation
+- ✅ Automated test execution
+- ✅ Failure diagnosis and recovery loop
 
-**Phase 3 — Engineering Workflow**
+**Phase 3 — Verification & Recovery** ✅ COMPLETE
+- ✅ Test failure classification and parsing
+- ✅ Iterative recovery: diagnose → fix → retest
+- ✅ Session state tracking (tests_passed, modifications, recovery_attempts)
+- ✅ Verification-aware prompts (first vs. continuation iterations)
+- ✅ Structured result models
+
+**Phase 4 — Engineering Workflow** (Next)
 - Human approval gates
-- File modification and implementation
-- Automated testing integration
-- Failure diagnosis and recovery
-- Code review
 - Requirement satisfaction evaluation
+- Code review and architectural analysis
 - → Next: Platform services
 
-**Phase 4 — Platform Services**
+**Phase 5 — Platform Services**
 - LLM gateway (multi-provider, routing, accounting)
 - Token and usage controls
 - Quotas and budgets
 - Observability and audit logging
 - → Next: Secure execution
 
-**Phase 5 — Secure Autonomous Engineering**
+**Phase 6 — Secure Autonomous Engineering**
 - Isolated execution environments
 - Containerization
 - Git integration
@@ -711,7 +744,7 @@ GitHub (PRs, commits, integration)
 - CI/CD integration
 - → Next: Real-world validation
 
-**Phase 6 — Product Validation**
+**Phase 7 — Product Validation**
 - Real engineering tasks
 - Measurement and analysis
 - Comparison with existing AI coding tools
@@ -737,7 +770,7 @@ GitHub (PRs, commits, integration)
 pip install -e .
 pip install -r requirements.txt
 
-# Run the test suite (93 tests)
+# Run the test suite (192 tests)
 python -m pytest
 
 # Manual integration test (requires GitHub Copilot subscription)
