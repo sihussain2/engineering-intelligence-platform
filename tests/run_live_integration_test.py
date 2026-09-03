@@ -62,7 +62,9 @@ def main():
         # Execute the actual tool
         result = original_execute(tool_call)
         
-        print(f"   Result type: {result.result_type}")
+        # Note: result is EIP ToolResult (not SDK ToolResult)
+        # EIP ToolResult has: tool_id, success, result, error
+        print(f"   Success: {result.success}")
         if result.success:
             result_preview = str(result.result)[:200]
             print(f"   Result preview: {result_preview}...")

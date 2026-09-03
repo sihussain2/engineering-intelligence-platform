@@ -133,7 +133,7 @@ class CopilotLLMClient:
         Async implementation of complete().
 
         Manages Copilot client lifecycle and handles tool invocation.
-        
+
         If dispatcher is configured and tools are provided:
         1. Converts EIP tool definitions to SDK Tool objects
         2. Creates handlers that route tool calls to ToolDispatcher
@@ -142,7 +142,7 @@ class CopilotLLMClient:
         5. Handlers execute through EIP's controlled ToolDispatcher
         6. SDK continues conversation with tool results
         7. Final response returned after all tool calls complete
-        
+
         SECURITY: When tools are provided, available_tools is set to an explicit
         allowlist containing ONLY those custom tools. This prevents the Copilot
         runtime from exposing built-in tools (bash, git, etc.) to the LLM.
@@ -165,7 +165,7 @@ class CopilotLLMClient:
         if self.dispatcher and tools:
             sdk_tools = self._build_sdk_tools(tools)
             session_config["tools"] = sdk_tools
-            
+
             # SECURITY: Restrict available tools to ONLY custom EIP tools.
             # This prevents the Copilot runtime from exposing built-in tools
             # (like bash, git, etc.) to the LLM.
@@ -192,7 +192,7 @@ class CopilotLLMClient:
         4. Converts result to SDK ToolResult
 
         Args:
-            eip_tools: List of EIP tool definitions (dicts with tool_id, name, 
+            eip_tools: List of EIP tool definitions (dicts with tool_id, name,
                 description, parameters)
 
         Returns:
@@ -288,7 +288,7 @@ class CopilotLLMClient:
         Run a Copilot session and collect final response.
 
         With real tool calling enabled (dispatcher configured + tools provided):
-        1. Calls session.send_and_wait() with user message
+        1. Calls session.send_and_wait() with full conversation history
         2. SDK sends message + tools to LLM
         3. If LLM requests a tool, SDK calls the tool handler
         4. Handler executes tool via ToolDispatcher and returns result
@@ -302,9 +302,14 @@ class CopilotLLMClient:
         The SDK handles all tool iteration internally via send_and_wait().
         We only need to wait for the final response.
 
+        FIX FOR SESSION ISOLATION: This method now includes FULL message history
+        in the prompt sent to send_and_wait(), not just the latest message.
+        This ensures the LLM has context from previous tool calls and responses,
+        even though each complete() call creates a new SDK session.
+
         Args:
             session: Copilot session object
-            messages: Conversation history
+            messages: Conversation history (full message history)
 
         Returns:
             Dict with content and done flag
@@ -312,24 +317,23 @@ class CopilotLLMClient:
         # Validate input
         if not messages:
             raise ValueError("Messages list cannot be empty")
-        
+
         last_message = messages[-1]
         if last_message.get("role") != "user":
             raise ValueError(
                 "Last message must be from user role for complete()"
             )
 
-        # Send user's message to Copilot and wait for complete response
-        user_text = last_message.get("content", "")
-        if not user_text:
-            raise ValueError("User message content cannot be empty")
+        # Build full conversation prompt including message history
+        # This ensures the LLM has context from all previous exchanges
+        full_prompt = self._build_full_prompt(messages)
 
         # send_and_wait() handles tool invocation internally:
         # - If tools are configured and LLM requests them, SDK calls handlers
         # - Handlers execute via ToolDispatcher
         # - Results are fed back to LLM
         # - SDK continues until final response is ready
-        response_event = await session.send_and_wait(user_text, timeout=30.0)
+        response_event = await session.send_and_wait(full_prompt, timeout=30.0)
 
         # Extract content from response
         if response_event is None:
@@ -340,7 +344,7 @@ class CopilotLLMClient:
         # Get the assistant message content
         # The SDK returns AssistantMessageData as the final message event
         content = getattr(response_event.data, "content", None)
-        
+
         if not content:
             raise RuntimeError(
                 "Copilot returned an empty response. "
@@ -354,6 +358,54 @@ class CopilotLLMClient:
         }
 
         return result
+
+    @staticmethod
+    def _build_full_prompt(messages: list[dict]) -> str:
+        """
+        Build a full conversation prompt from message history.
+
+        Converts the message history into a single prompt string that includes
+        all previous exchanges. This ensures the LLM has full context even though
+        each complete() call creates a new SDK session.
+
+        Args:
+            messages: List of message dicts with "role" and "content"
+
+        Returns:
+            Single prompt string with full conversation history
+        """
+        if not messages:
+            return ""
+
+        # If only one message, it's just the user's message
+        if len(messages) == 1:
+            return messages[0].get("content", "")
+
+        # Format previous messages as conversation history
+        prompt_parts = []
+
+        # Include all but the last message as context
+        for msg in messages[:-1]:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+
+            if role == "assistant":
+                prompt_parts.append(f"Assistant: {content}")
+            elif role == "user":
+                prompt_parts.append(f"User: {content}")
+            else:
+                prompt_parts.append(f"{role}: {content}")
+
+        # Add the final user message
+        final_msg = messages[-1]
+        final_content = final_msg.get("content", "")
+
+        # If there's history, prefix the current message
+        if len(messages) > 1:
+            prompt_parts.append(f"\nCurrent request from user: {final_content}")
+            return "\n".join(prompt_parts)
+        else:
+            return final_content
 
     @staticmethod
     def _convert_messages(messages: list[dict]) -> list[dict]:

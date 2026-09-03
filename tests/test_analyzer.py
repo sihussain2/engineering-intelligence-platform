@@ -5,17 +5,29 @@ from pathlib import Path
 import pytest
 
 from eip.analyst.analyzer import RepositoryAnalyst
+from eip.analyst.result import Confidence, ComponentType, FileReference, ComponentInfo
 from eip.repository.tool import RepositoryTool
 
 
-class TestRepositoryAnalyst:
-    """Tests for RepositoryAnalyst initialization and analysis."""
+class TestRepositoryAnalystBasic:
+    """Tests for RepositoryAnalyst initialization and basic analysis."""
 
     def test_analyst_initialization(self, tmp_path: Path):
         repo_tool = RepositoryTool(tmp_path)
         analyst = RepositoryAnalyst(repo_tool)
 
         assert analyst.repository_tool is repo_tool
+        assert analyst.llm_client is None
+
+    def test_analyst_initialization_with_llm(self, tmp_path: Path):
+        from eip.llm.mock import MockLLMClient
+
+        repo_tool = RepositoryTool(tmp_path)
+        llm = MockLLMClient()
+        analyst = RepositoryAnalyst(repo_tool, llm_client=llm)
+
+        assert analyst.repository_tool is repo_tool
+        assert analyst.llm_client is llm
 
     def test_analyst_rejects_non_repository_tool(self):
         with pytest.raises(TypeError, match="repository_tool must be a RepositoryTool"):
@@ -47,8 +59,6 @@ class TestRepositoryAnalyst:
         assert result.requirement == "Implement feature X"
         assert result.impact_analysis is not None
         assert result.verification_plan is not None
-        assert result.identified_risks == []
-        assert result.open_questions == []
 
     def test_analyze_with_python_project(self, tmp_path: Path):
         # Create a simple Python project structure
@@ -65,31 +75,16 @@ class TestRepositoryAnalyst:
 
         # Verify repository understanding was generated
         understanding = result.repository_understanding
-        assert "Python project" in understanding or "items detected" in understanding
+        assert "Python" in understanding or "items detected" in understanding
 
-    def test_analyze_handles_inaccessible_repository(self, tmp_path: Path):
-        # Create a repository with files
-        (tmp_path / "file.txt").write_text("test")
-
+    def test_analyze_without_llm_returns_low_confidence(self, tmp_path: Path):
+        """Without LLM, analysis should return low confidence baseline."""
         repo_tool = RepositoryTool(tmp_path)
-        analyst = RepositoryAnalyst(repo_tool)
-
-        # Should still return a valid result even with basic info
-        result = analyst.analyze("Test requirement")
-
-        assert result.requirement == "Test requirement"
-        assert result.repository_understanding is not None
-        # Should describe what was found
-        assert "detected" in result.repository_understanding or "Python" in result.repository_understanding
-
-    def test_analyze_returns_low_confidence_placeholder(self, tmp_path: Path):
-        repo_tool = RepositoryTool(tmp_path)
-        analyst = RepositoryAnalyst(repo_tool)
+        analyst = RepositoryAnalyst(repo_tool, llm_client=None)
 
         result = analyst.analyze("New feature")
 
-        # Placeholder results should have low confidence
-        from eip.analyst.result import Confidence
+        # Baseline results should have low confidence
         assert result.confidence == Confidence.LOW
 
     def test_multiple_analyses_independent(self, tmp_path: Path):
